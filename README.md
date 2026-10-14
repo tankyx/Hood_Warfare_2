@@ -17,6 +17,8 @@ patching: the game is read through `/proc/<pid>/mem`.
 | `hw2_mem.py` | memory layer: attach, GObjects, FNamePool, object/class reads |
 | `hw2_players.py` | live player list: name, pawn, world position |
 | `hw2_w2s.py` | camera POV + world->screen projection |
+| `src/hw2_mem.h` | C++ reader (same constants as `hw2_mem.py`) |
+| `src/hw2_overlay.cpp` | ESP overlay (boxes, labels, stats, optional aim) |
 
 ## Smoke test
 
