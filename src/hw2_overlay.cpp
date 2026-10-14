@@ -39,6 +39,7 @@ struct Options {
     float aimFov = 6.0f;        // aim cone, degrees from crosshair
     float aimScale = 1.0f;
     float aimHeight = 0.40f;    // aim point as a fraction of body height above the capsule centre (0.5 = crown, 0.40 ~ neck)
+    bool teams = false;         // false = FFA (everyone hostile); true = compare PawnTeam
     bool aimDebug = false;
     int hz = 120;
 };
@@ -101,6 +102,7 @@ int main(int argc, char **argv) {
         else if (a == "--height" && i + 1 < argc) opt.height = std::atof(argv[++i]);
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
         else if (a == "--aim-height" && i + 1 < argc) opt.aimHeight = std::atof(argv[++i]);
+        else if (a == "--teams") opt.teams = true;
         else if (a == "--aim-debug") opt.aimDebug = true;
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
@@ -172,12 +174,16 @@ int main(int argc, char **argv) {
     std::vector<uintptr_t> actors;
     uintptr_t camMgr = 0, localPawn = 0;
     auto lastScan = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    double lastScanMs = 0.0;
 
     while (true) {
         const auto t0 = std::chrono::steady_clock::now();
         if (actors.empty() ||
             std::chrono::duration_cast<std::chrono::milliseconds>(t0 - lastScan).count() > 1500) {
+            const auto s0 = std::chrono::steady_clock::now();
             rd.scanActors(camMgr, localPawn, actors);
+            lastScanMs = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - s0).count();
             lastScan = t0;
         }
         const hw2::Camera cam = camMgr ? rd.readCameraAt(camMgr) : hw2::Camera{};
@@ -219,7 +225,8 @@ int main(int argc, char **argv) {
                 shapes.push_back(ring);
             }
             for (const auto &p : players) {
-                if (p.dead) continue;   // don't box corpses
+                if (p.local) continue;   // never ESP your own entity
+                if (p.dead) continue;    // don't box corpses
                 const double d = dist(p.pos, cam.loc);
                 if (d > opt.maxDist) continue;
                 // The actor origin is the capsule centre (~hip), so the box spans
@@ -234,7 +241,7 @@ int main(int argc, char **argv) {
                 const float bx = (hx + fx) / 2.0f - bw / 2.0f;
                 const float by = std::min(hy, fy);
 
-                const bool ally = (p.team >= 0 && p.team == localTeam);
+                const bool ally = opt.teams && p.team >= 0 && p.team == localTeam;
                 const uint32_t color = p.local ? 0xFF00FFFFu
                                      : ally    ? 0xFF33FF55u
                                                : 0xFFFF3030u;
@@ -282,7 +289,6 @@ int main(int argc, char **argv) {
                     boxes.push_back(t);
                 }
 
-                if (p.local) continue;  // aim only at others
                 if (!ally && aimMaxPx > 0.0) {
                     // Aim point is its own height (neck by default), independent of
                     // the box, which still spans the full body.
@@ -328,10 +334,10 @@ int main(int argc, char **argv) {
         }
         if (opt.aimDebug && (frames % 60) == 0) {
             std::fprintf(stderr,
-                         "aim: lmb_ok=%d lmb_down=%d rmb=%d mask=0x%02x mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s\n",
+                         "aim: lmb_ok=%d lmb_down=%d rmb=%d mask=0x%02x mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s scan=%.1fms\n",
                          (int)lmb.ok(), (int)lmb.down(), (int)((lmb.mask() & phm::Right) != 0),
                          (unsigned)lmb.mask(), (int)mouse.ok(), aimMaxPx, bestMag,
-                         bestOx, bestOy, bestMag < aimMaxPx ? "yes" : "no");
+                         bestOx, bestOy, bestMag < aimMaxPx ? "yes" : "no", lastScanMs);
         }
 
         if (++fpsFrames >= 30) {

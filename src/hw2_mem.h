@@ -50,6 +50,9 @@ constexpr uint32_t kOffCamOwner = 0x158;
 constexpr uint32_t kOffPawnTeam = 0x910;
 constexpr uint32_t kOffHealthComp = 0x6C0;
 constexpr uint32_t kOffDead = 0xF8;
+constexpr uint32_t kOffOuter = 0x20;      // UObject::OuterPrivate
+constexpr uint32_t kOffPersistentLevel = 0x30;
+constexpr uint32_t kOffActors = 0xA0;     // ULevel::Actors (TArray<AActor*>)
 constexpr uint32_t kOffHealth = 0xC8;     // AC_Health_C::Health    (double)
 constexpr uint32_t kOffMaxHealth = 0xD0;  // AC_Health_C::MaxHealth (double)
 
@@ -219,33 +222,40 @@ public:
 
     // ---- cheap, cache-friendly access (the expensive full scan runs rarely) ----
 
-    // One full pass over GObjects. Expensive (tens of thousands of reads), so
-    // callers should run it every second or two and cache the result.
+    // Rebuild the actor list. Cheap path: the camera manager's Outer is the
+    // ULevel, whose Actors array lists every actor (~hundreds) -- far cheaper
+    // than walking all objects. The expensive full GObjects scan runs only to
+    // (re)locate the camera manager, i.e. once per level/pawn change.
     void scanActors(uintptr_t &camMgr, uintptr_t &localPawn,
                     std::vector<uintptr_t> &actors) const {
         actors.clear();
-        camMgr = 0;
         localPawn = 0;
-        const int32_t n = objectCount();
-        for (int32_t i = 0; i < n; ++i) {
-            const uintptr_t o = objectAt(i);
-            if (!o) continue;
-            const uintptr_t cls = classOf(o);
-            if (!cls) continue;
-            if (!camMgr && isClassNamed(cls, "PlayerCameraManager")) {
-                if (nameOf(o).rfind("Default__", 0) != 0) {
-                    camMgr = o;
-                    const uintptr_t ctrl = u64(o + kOffCamOwner);
-                    if (ctrl) localPawn = u64(ctrl + kOffCtrlPawn);
-                }
-                continue;
-            }
-            if (!isCharacterClass(cls)) continue;
-            if (nameOf(o).rfind("Default__", 0) == 0) continue;
-            if (!u64(o + kOffRootComponent)) continue;   // not spawned yet
-            actors.push_back(o);
+        if (!_camMgr || className(_camMgr) != "PlayerCameraManager" ||
+            nameOf(_camMgr).rfind("Default__", 0) == 0)
+            _camMgr = findCameraManager();
+        camMgr = _camMgr;
+        if (!camMgr) return;
+        const uintptr_t ctrl = u64(camMgr + kOffCamOwner);
+        if (ctrl) localPawn = u64(ctrl + kOffCtrlPawn);
+
+        const uintptr_t level = u64(camMgr + kOffOuter);
+        if (className(level) != "Level") {  // not spawned yet / unexpected
+            actors.clear();
+            return;
+        }
+        const int32_t num = i32(level + kOffActors + 8);
+        const uintptr_t data = u64(level + kOffActors);
+        if (!data || num <= 0 || num > 1000000) return;
+        for (int32_t k = 0; k < num; ++k) {
+            const uintptr_t a = u64(data + static_cast<uintptr_t>(k) * 8);
+            if (!a || !isCharacterClass(classOf(a))) continue;
+            if (!u64(a + kOffRootComponent)) continue;   // not spawned yet
+            actors.push_back(a);
         }
     }
+
+    // Full pass over GObjects, used only to (re)locate the camera manager.
+    uintptr_t scanForCameraManager() const { return findCameraManager(); }
 
     Player readPlayer(uintptr_t o) const {
         Player p;
@@ -352,6 +362,7 @@ private:
     uintptr_t _objects = 0;
     uintptr_t _blocks = 0;
     mutable std::unordered_map<uintptr_t, bool> _charClass;
+    mutable uintptr_t _camMgr = 0;
 };
 
 }  // namespace hw2
