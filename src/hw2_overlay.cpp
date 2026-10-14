@@ -41,7 +41,7 @@ struct Options {
     float aimHeight = 0.40f;    // aim point as a fraction of body height above the capsule centre (0.5 = crown, 0.40 ~ neck)
     bool teams = false;         // false = FFA (everyone hostile); true = compare PawnTeam
     bool aimDebug = false;
-    int hz = 120;
+    int hz = 160;
 };
 
 std::string argValue(int argc, char **argv, const std::string &key) {
@@ -325,7 +325,7 @@ int main(int argc, char **argv) {
 
         if (opt.aim && cam.ok && mouse.ok() && lmb.ok() && lmb.down() &&
             bestMag < aimMaxPx && bestMag > 2.0f) {
-            const float gain = 0.05f * opt.aimScale;
+            const float gain = 0.15f * opt.aimScale;
             const int dx = static_cast<int>(std::lround(bestOx * gain));
             const int dy = static_cast<int>(std::lround(bestOy * gain));
             // Re-send the physical button state: a HID report replaces the whole
