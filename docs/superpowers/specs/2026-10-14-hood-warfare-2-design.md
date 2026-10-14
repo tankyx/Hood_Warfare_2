@@ -13,14 +13,14 @@ Three sibling repos establish the pattern this project copies:
 | `Halo-MCC` | Halo 3 in MCC | in-house | full overlay: boxes, bones, bars, aim |
 | `Halo-Infinite` | Halo Infinite MP | in-house | RE map + probes + player-box overlay |
 | `CS2Miam` | CS2 | Source 2 | overlay + aim (Arduino HID) |
-| `YOLOv8-TensorRT-CPP` | CS2 / Valorant | — | overlay + aim (`/dev/uinput`) |
+| `YOLOv8-TensorRT-CPP` | CS2 / Valorant | — | overlay + aim (physical USB HID) |
 
 All share one contract, and this project keeps it:
 
 > **Read the game through `/proc/<pid>/mem`; never inject, hook, or patch the
-> game process. Output input through an external device** — `/dev/uinput`
-> virtual mouse (YOLO) or a serial HID microcontroller (CS2Miam) — **never
-> into the game.**
+> game process. Output input through a real USB HID device** — an MCU
+> presenting as a mouse (the shared `PhysicalHidMouse` library) — **never
+> into the game, and never `/dev/uinput`.**
 
 Hood Warfare 2 is the first **Unreal Engine 5.8.3** target. Halo's data arrays
 are hand-rolled and fingerprinted; UE ships the same engine reflection in every
@@ -49,6 +49,7 @@ memory reader. Plus the RE write-up that documents every address and offset.
 ## Non-goals
 
 - No injection, hooks, trampolines, DLL sideloading, or process patching.
+- No `/dev/uinput`: aim output goes to a real USB HID device.
 - No asset extraction / pak unpacking.
 - No bypass of EOS Anti-Cheat.
 - No game-file modification.
@@ -68,7 +69,8 @@ memory reader. Plus the RE write-up that documents every address and offset.
    `APlayerCameraManager`) and derive the field offsets from `UClass`
    reflection; verify each against live values.
 4. **Reader + overlay.** Port the verified constants to `src/hw2_mem.h`,
-   draw with the shared `Wayland_Game_Overlay`, aim via `/dev/uinput`.
+   draw with the shared `Wayland_Game_Overlay`, aim via the shared
+   `PhysicalHidMouse`.
 
 Rejected: live-only fingerprinting (UE's chunked object/name arrays are far
 less fingerprintable than Halo's self-describing arrays) and off-the-shelf
@@ -96,9 +98,10 @@ hw2_players.py         PlayerArray: team, name, pawn, position, health
 hw2_w2s.py             camera POV + world→screen projection
 src/hw2_mem.h          the C++ reader (base+RVA, no injection)
 src/hw2_overlay.cpp    the overlay: boxes, labels, health, aim
-src/hw2_aim.h          VirtualMouse (/dev/uinput) + MouseButtons (evdev gate)
+src/hw2_aim.h          MouseButtons (evdev gate); aim output via PhysicalHidMouse
 src/x11_window.h       game window / monitor detection (copied from Halo)
 third_party/Wayland_Game_Overlay   submodule, shared with both Halo repos
+third_party/PhysicalHidMouse       shared physical USB HID mouse library
 CMakeLists.txt         mirrors Halo-Infinite
 README.md              usage + anti-cheat note
 ```
@@ -123,8 +126,8 @@ Each phase ends with one runnable check.
 7. **C++ reader** (`src/hw2_mem.h`) — port verified constants. *Check: matches
    the Python output for the same frame.*
 8. **Overlay + aim** (`src/hw2_overlay.cpp`, `src/hw2_aim.h`) — boxes, labels,
-   health, uinput aim gated on the physical mouse. *Check: boxes track players;
-   aim only fires while the gate button is held.*
+   health, physical-HID aim gated on the physical mouse. *Check: boxes track
+   players; aim only fires while the gate button is held.*
 9. **Write-up + README** — `HOOD_WARFARE_2.md`, README.
 
 ## Verification
@@ -142,9 +145,9 @@ Each phase ends with one runnable check.
 - Reads are `/proc/<pid>/mem` only. EOS AC keys on client integrity and
   process/module tampering, not arbitrary reads; even so, a live-service match
   can disagree — the README says so, as both Halo repos do.
-- Input never enters the game process. Aim uses `/dev/uinput` (YOLO/Halo-MCC
-  method), gated on the physical mouse via `EVIOCGKEY`; an Arduino/serial HID
-  backend (CS2Miam method) is a documented alternative.
+- Input never enters the game process. Aim uses a real USB HID mouse via the
+  shared `PhysicalHidMouse` library — not `/dev/uinput` — gated on the physical
+  mouse via `EVIOCGKEY`.
 - Aim assist defaults **off**; ESP is the default.
 - No anti-cheat bypass is implemented or attempted.
 
