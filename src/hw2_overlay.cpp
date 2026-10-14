@@ -202,6 +202,20 @@ int main(int argc, char **argv) {
                 const double focal = (opt.renderH / 2.0) / std::tan(fovY / 2.0);
                 aimMaxPx = std::tan(opt.aimFov * M_PI / 360.0) * focal;
             }
+            if (opt.aim && aimMaxPx > 0.0) {
+                // The aim cone, as a circle around the crosshair (radius = the
+                // pixel half-angle the target selection uses).
+                WaylandOverlay::Shape ring;
+                ring.kind = WaylandOverlay::Shape::Ellipse;
+                ring.x0 = opt.renderW / 2.0f;
+                ring.y0 = opt.renderH / 2.0f;
+                ring.x1 = static_cast<float>(aimMaxPx);
+                ring.y1 = static_cast<float>(aimMaxPx);
+                ring.outline = true;
+                ring.thickness = 1.5f;
+                ring.color = 0x99FFEE00u;  // translucent yellow
+                shapes.push_back(ring);
+            }
             for (const auto &p : players) {
                 if (p.dead) continue;   // don't box corpses
                 const double d = dist(p.pos, cam.loc);
