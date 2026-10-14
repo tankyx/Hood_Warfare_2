@@ -38,6 +38,7 @@ struct Options {
     bool aim = false;
     float aimFov = 6.0f;        // aim cone, degrees from crosshair
     float aimScale = 1.0f;
+    float aimHeight = 0.40f;    // aim point as a fraction of body height above the capsule centre (0.5 = crown, 0.40 ~ neck)
     bool aimDebug = false;
     int hz = 120;
 };
@@ -99,6 +100,7 @@ int main(int argc, char **argv) {
         else if (a == "--max-dist" && i + 1 < argc) opt.maxDist = std::atof(argv[++i]);
         else if (a == "--height" && i + 1 < argc) opt.height = std::atof(argv[++i]);
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
+        else if (a == "--aim-height" && i + 1 < argc) opt.aimHeight = std::atof(argv[++i]);
         else if (a == "--aim-debug") opt.aimDebug = true;
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
@@ -260,12 +262,19 @@ int main(int argc, char **argv) {
 
                 if (p.local) continue;  // aim only at others
                 if (!ally && aimMaxPx > 0.0) {
-                    const float cx = hx - opt.renderW / 2.0f;
-                    const float cy = hy - opt.renderH / 2.0f;
-                    const float mag = std::sqrt(cx * cx + cy * cy);
-                    if (mag < aimMaxPx && mag < bestMag) {
-                        bestMag = mag;
-                        bestOx = cx; bestOy = cy;
+                    // Aim point is its own height (neck by default), independent of
+                    // the box, which still spans the full body.
+                    const hw2::Vec3 aimPt{p.pos.x, p.pos.y,
+                                          p.pos.z + opt.height * opt.aimHeight};
+                    float nx, ny, nf;
+                    if (project(aimPt, cam, opt.renderW, opt.renderH, nx, ny, nf)) {
+                        const float cx = nx - opt.renderW / 2.0f;
+                        const float cy = ny - opt.renderH / 2.0f;
+                        const float mag = std::sqrt(cx * cx + cy * cy);
+                        if (mag < aimMaxPx && mag < bestMag) {
+                            bestMag = mag;
+                            bestOx = cx; bestOy = cy;
+                        }
                     }
                 }
             }
