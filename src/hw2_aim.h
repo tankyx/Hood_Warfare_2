@@ -114,4 +114,59 @@ private:
     std::string _name;
 };
 
+// A key on a keyboard-like device (no relative axes), polled with EVIOCGKEY.
+// Used for the kill switch so the overlay can be stopped from the game.
+class KeyGate {
+public:
+    ~KeyGate() { if (_fd >= 0) ::close(_fd); }
+
+    bool open(uint16_t code) {
+        _code = code;
+        DIR *d = ::opendir("/dev/input");
+        if (!d) return false;
+        for (dirent *e; (e = ::readdir(d));) {
+            if (std::strncmp(e->d_name, "event", 5) != 0) continue;
+            char path[128];
+            std::snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
+            const int fd = ::open(path, O_RDONLY | O_NONBLOCK);
+            if (fd < 0) continue;
+            char name[256] = {0};
+            ::ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
+            unsigned long keys[12] = {0};
+            unsigned long rel[8] = {0};
+            if (::ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0 ||
+                ::ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel)), rel) < 0) {
+                ::close(fd);
+                continue;
+            }
+            const auto has = [](const unsigned long *b, int bit) {
+                return (b[bit / (8 * sizeof(long))] >> (bit % (8 * sizeof(long)))) & 1UL;
+            };
+            if (has(rel, REL_X) || !has(keys, code)) {  // keyboards only
+                ::close(fd);
+                continue;
+            }
+            _fd = fd;
+            _path = path;
+            break;
+        }
+        ::closedir(d);
+        return _fd >= 0;
+    }
+
+    bool ok() const { return _fd >= 0; }
+
+    bool down() const {
+        if (_fd < 0) return false;
+        unsigned long keys[12] = {0};
+        if (::ioctl(_fd, EVIOCGKEY(sizeof(keys)), keys) < 0) return false;
+        return (keys[_code / (8 * sizeof(long))] >> (_code % (8 * sizeof(long)))) & 1UL;
+    }
+
+private:
+    int _fd = -1;
+    uint16_t _code = KEY_HOME;
+    std::string _path;
+};
+
 }  // namespace hw2

@@ -162,6 +162,10 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "aim gate: %s (%s) — aim engages on RMB\n", lmb.path(), lmb.name());
     }
 
+    hw2::KeyGate killKey;
+    std::fprintf(stderr, "kill switch (HOME): %s\n",
+                 killKey.open(KEY_HOME) ? "armed" : "keyboard not found");
+
     std::vector<std::string> labelNames;
     std::vector<WaylandOverlay::DetectionBox> boxes;
     std::vector<WaylandOverlay::Shape> shapes;
@@ -178,6 +182,10 @@ int main(int argc, char **argv) {
 
     while (true) {
         const auto t0 = std::chrono::steady_clock::now();
+        if (killKey.ok() && killKey.down()) {
+            std::fprintf(stderr, "HOME pressed - shutting down\n");
+            break;
+        }
         if (actors.empty() ||
             std::chrono::duration_cast<std::chrono::milliseconds>(t0 - lastScan).count() > 1500) {
             const auto s0 = std::chrono::steady_clock::now();
