@@ -47,24 +47,14 @@ std::string argValue(int argc, char **argv, const std::string &key) {
     return {};
 }
 
-// Team index/name from the character class name.
-int teamIndex(const std::string &cls, std::vector<std::string> &names) {
-    struct { const char *needle; const char *name; } teams[] = {
-        {"TeamAlpha", "Team Alpha"}, {"TeamBeta", "Team Beta"},
-        {"Bloods", "Bloods"}, {"Crips", "Crips"},
-    };
-    for (auto &t : teams) {
-        if (cls.find(t.needle) != std::string::npos) {
-            for (size_t i = 0; i < names.size(); ++i)
-                if (names[i] == t.name) return static_cast<int>(i);
-            names.push_back(t.name);
-            return static_cast<int>(names.size() - 1);
-        }
-    }
-    for (size_t i = 0; i < names.size(); ++i)
-        if (names[i] == "Enemy") return static_cast<int>(i);
-    names.push_back("Enemy");
-    return static_cast<int>(names.size() - 1);
+// Faction token from a character class name: the token before the trailing
+// "_C" ("BP_Tyreese_TeamAlpha_C" -> "TeamAlpha"). The local player's faction
+// defines "ally"; anything else is "hostile".
+std::string factionOf(const std::string &cls) {
+    std::string s = cls;
+    if (s.size() > 2 && s.compare(s.size() - 2, 2, "_C") == 0) s.resize(s.size() - 2);
+    const auto pos = s.rfind('_');
+    return pos == std::string::npos ? s : s.substr(pos + 1);
 }
 
 // Project a world point to render pixels. Returns false when behind the camera.
@@ -106,6 +96,7 @@ int main(int argc, char **argv) {
         else if (a == "--no-labels") opt.labels = false;
         else if (a == "--render" && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &opt.renderW, &opt.renderH);
         else if (a == "--max-dist" && i + 1 < argc) opt.maxDist = std::atof(argv[++i]);
+        else if (a == "--height" && i + 1 < argc) opt.height = std::atof(argv[++i]);
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
@@ -190,6 +181,7 @@ int main(int argc, char **argv) {
             p.local = (a == localPawn);
             players.push_back(std::move(p));
         }
+        const std::string localFaction = localPawn ? factionOf(rd.className(localPawn)) : "";
 
         boxes.clear();
         shapes.clear();
@@ -200,8 +192,10 @@ int main(int argc, char **argv) {
             for (const auto &p : players) {
                 const double d = dist(p.pos, cam.loc);
                 if (d > opt.maxDist) continue;
-                hw2::Vec3 head{p.pos.x, p.pos.y, p.pos.z + opt.height};
-                hw2::Vec3 feet = p.pos;
+                // The actor origin is the capsule centre (~hip), so the box spans
+                // half the height either side of it: head at +h/2, feet at -h/2.
+                const hw2::Vec3 head{p.pos.x, p.pos.y, p.pos.z + opt.height * 0.5};
+                const hw2::Vec3 feet{p.pos.x, p.pos.y, p.pos.z - opt.height * 0.5};
                 float hx, hy, fx, fy, hf, ff;
                 if (!project(head, cam, opt.renderW, opt.renderH, hx, hy, hf)) continue;
                 if (!project(feet, cam, opt.renderW, opt.renderH, fx, fy, ff)) continue;
@@ -210,30 +204,52 @@ int main(int argc, char **argv) {
                 const float bx = (hx + fx) / 2.0f - bw / 2.0f;
                 const float by = std::min(hy, fy);
 
-                const int team = teamIndex(p.cls, labelNames);
-                WaylandOverlay::DetectionBox b;
-                b.x = bx; b.y = by; b.w = bw; b.h = bh;
-                b.label = opt.labels ? static_cast<int>(labelNames.size()) : team;
-                b.confidence = 1.0f;
+                const bool ally = (factionOf(p.cls) == localFaction);
+                const uint32_t color = p.local ? 0xFF00FFFFu
+                                     : ally    ? 0xFF33FF55u
+                                               : 0xFFFF3030u;
+
+                // Box as an explicit-colour shape, so ally/hostile colouring does
+                // not depend on the label palette.
+                WaylandOverlay::Shape box;
+                box.kind = WaylandOverlay::Shape::Filled;
+                box.x0 = bx; box.y0 = by; box.x1 = bx + bw; box.y1 = by + bh;
+                box.outline = true;
+                box.thickness = 2.0f;
+                box.color = color;
+                shapes.push_back(box);
+
                 if (opt.labels) {
-                    labelNames.push_back(p.cls + " " + std::to_string(static_cast<int>(d / 100.0f + 0.5f)) + "m");
+                    WaylandOverlay::DetectionBox t;
+                    t.x = hx; t.y = hy; t.w = 0; t.h = 0;   // label only
+                    t.label = static_cast<int>(labelNames.size());
+                    t.confidence = 1.0f;
+                    const char *tag = p.local ? "YOU " : (ally ? "[A] " : "[H] ");
+                    labelNames.push_back(std::string(tag) + p.name + " " +
+                                         std::to_string(static_cast<int>(d / 100.0f + 0.5f)) + "m");
+                    boxes.push_back(t);
                 }
-                boxes.push_back(b);
 
                 if (p.local) continue;  // aim only at others
-
-                const float cx = hx - opt.renderW / 2.0f;
-                const float cy = hy - opt.renderH / 2.0f;
-                if (std::sqrt(cx * cx + cy * cy) < bestMag) { bestMag = std::sqrt(cx * cx + cy * cy); bestOx = cx; bestOy = cy; }
+                if (!ally) {
+                    const float cx = hx - opt.renderW / 2.0f;
+                    const float cy = hy - opt.renderH / 2.0f;
+                    if (std::sqrt(cx * cx + cy * cy) < bestMag) {
+                        bestMag = std::sqrt(cx * cx + cy * cy);
+                        bestOx = cx; bestOy = cy;
+                    }
+                }
             }
         }
 
         if (opt.dump) {
-            std::printf("cam=(%8.1f,%8.1f,%8.1f) fov=%.1f players=%zu\n",
-                        cam.loc.x, cam.loc.y, cam.loc.z, cam.fov, players.size());
-            std::printf("  on-screen boxes: %zu\n", boxes.size());
-            for (const auto &b : boxes)
-                std::printf("    box x=%.0f y=%.0f w=%.0f h=%.0f\n", b.x, b.y, b.w, b.h);
+            std::printf("cam=(%8.1f,%8.1f,%8.1f) fov=%.1f players=%zu local-faction=%s\n",
+                        cam.loc.x, cam.loc.y, cam.loc.z, cam.fov, players.size(), localFaction.c_str());
+            for (const auto &p : players)
+                std::printf("  %-34s %-12s %s pos=(%9.1f,%9.1f,%9.1f)\n", p.cls.c_str(),
+                            factionOf(p.cls).c_str(),
+                            p.local ? "YOU" : (factionOf(p.cls) == localFaction ? "ALLY" : "HOSTILE"),
+                            p.pos.x, p.pos.y, p.pos.z);
         } else {
             overlay.setLabelNames(labelNames);
             overlay.setDetections(std::move(boxes));
