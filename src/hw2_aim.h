@@ -88,6 +88,25 @@ public:
         return (keys[_code / (8 * sizeof(long))] >> (_code % (8 * sizeof(long)))) & 1UL;
     }
 
+    // The physical mouse's current button state, as a phm button mask. Injected
+    // HID reports replace the whole button byte, so this must be re-sent with
+    // every move -- otherwise holding right mouse (ADS) would be released.
+    uint8_t mask() const {
+        if (_fd < 0) return 0;
+        unsigned long keys[12] = {0};
+        if (::ioctl(_fd, EVIOCGKEY(sizeof(keys)), keys) < 0) return 0;
+        const auto held = [&](int bit) {
+            return (keys[bit / (8 * sizeof(long))] >> (bit % (8 * sizeof(long)))) & 1UL;
+        };
+        uint8_t m = 0;
+        if (held(BTN_LEFT)) m |= phm::Left;
+        if (held(BTN_RIGHT)) m |= phm::Right;
+        if (held(BTN_MIDDLE)) m |= phm::Middle;
+        if (held(BTN_SIDE)) m |= phm::X1;
+        if (held(BTN_EXTRA)) m |= phm::X2;
+        return m;
+    }
+
 private:
     int _fd = -1;
     uint16_t _code = BTN_LEFT;

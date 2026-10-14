@@ -274,15 +274,18 @@ int main(int argc, char **argv) {
 
         if (opt.aim && cam.ok && mouse.ok() && lmb.ok() && lmb.down() &&
             bestMag < aimMaxPx && bestMag > 2.0f) {
-            const float gain = 0.35f * opt.aimScale;
+            const float gain = 0.10f * opt.aimScale;
             const int dx = static_cast<int>(std::lround(bestOx * gain));
             const int dy = static_cast<int>(std::lround(bestOy * gain));
-            if (dx || dy) mouse.move(dx, dy);
+            // Re-send the physical button state: a HID report replaces the whole
+            // button byte, so dropping it would release a held right mouse (ADS).
+            if (dx || dy) mouse.move(dx, dy, lmb.mask());
         }
         if (opt.aimDebug && (frames % 60) == 0) {
             std::fprintf(stderr,
-                         "aim: lmb_ok=%d lmb_down=%d mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s\n",
-                         (int)lmb.ok(), (int)lmb.down(), (int)mouse.ok(), aimMaxPx, bestMag,
+                         "aim: lmb_ok=%d lmb_down=%d rmb=%d mask=0x%02x mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s\n",
+                         (int)lmb.ok(), (int)lmb.down(), (int)((lmb.mask() & phm::Right) != 0),
+                         (unsigned)lmb.mask(), (int)mouse.ok(), aimMaxPx, bestMag,
                          bestOx, bestOy, bestMag < aimMaxPx ? "yes" : "no");
         }
 
