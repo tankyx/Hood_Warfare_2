@@ -40,6 +40,7 @@ struct Options {
     float aimScale = 1.0f;
     float aimHeight = 0.40f;    // aim point as a fraction of body height above the capsule centre (0.5 = crown, 0.40 ~ neck)
     bool teams = false;         // false = FFA (everyone hostile); true = compare PawnTeam
+    bool fx = true;             // anti-alias + rounded corners + hostile glow
     bool aimDebug = false;
     int hz = 160;
 };
@@ -103,6 +104,7 @@ int main(int argc, char **argv) {
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
         else if (a == "--aim-height" && i + 1 < argc) opt.aimHeight = std::atof(argv[++i]);
         else if (a == "--teams") opt.teams = true;
+        else if (a == "--no-fx") opt.fx = false;
         else if (a == "--aim-debug") opt.aimDebug = true;
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
@@ -142,6 +144,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "no game window found; assuming %dx%d fullscreen\n", opt.renderW, opt.renderH);
 
     WaylandOverlay overlay(haveWindow ? monW : opt.renderW, haveWindow ? monH : opt.renderH);
+    if (opt.fx) overlay.setAntiAlias(true);   // smoothed lines/ellipses/polygons
     overlay.setSourceSize(opt.renderW, opt.renderH);
     if (haveWindow) overlay.setWindowRect(mapX, mapY, winW, winH);
     if (!opt.dump && !overlay.start()) {
@@ -262,6 +265,13 @@ int main(int argc, char **argv) {
                 box.outline = true;
                 box.thickness = 2.0f;
                 box.color = color;
+                if (opt.fx) {
+                    box.radius = 3.0f;                 // rounded corners
+                    if (!ally) {                       // hostiles get a soft halo
+                        box.glow = true;
+                        box.glowRadius = 5.0f;
+                    }
+                }
                 shapes.push_back(box);
 
                 // HP bar to the left of the box: full-height dark track with a
@@ -274,6 +284,7 @@ int main(int argc, char **argv) {
                     track.x0 = barX; track.y0 = by;
                     track.x1 = barX + barW; track.y1 = by + bh;
                     track.color = 0x90000000u;
+                    if (opt.fx) track.radius = 1.0f;
                     shapes.push_back(track);
                     WaylandOverlay::Shape fill;
                     fill.kind = WaylandOverlay::Shape::Filled;
@@ -282,6 +293,7 @@ int main(int argc, char **argv) {
                     fill.color = frac > 0.6f ? 0xFF33FF33u
                                : frac > 0.3f ? 0xFFFFE000u
                                             : 0xFFFF3030u;
+                    if (opt.fx) fill.radius = 1.0f;
                     shapes.push_back(fill);
                 }
 
