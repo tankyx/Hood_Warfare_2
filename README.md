@@ -14,13 +14,21 @@ patching: the game is read through `/proc/<pid>/mem`.
 
 | file | what |
 |---|---|
-| `hw2_mem.py` | attach harness: find the process, map the module, read memory |
+| `hw2_mem.py` | memory layer: attach, GObjects, FNamePool, object/class reads |
+| `hw2_players.py` | live player list: name, pawn, world position |
+| `hw2_w2s.py` | camera POV + world->screen projection |
 
 ## Smoke test
 
 With the game running:
 
 ```sh
-python3 hw2_mem.py
-# pid=<pid> base=0x140000000 header=b'MZ'
+python3 hw2_mem.py              # pid=<pid> base=0x140000000 header=b'MZ'
+python3 hw2_mem.py --names      # FNamePool sanity check
+python3 hw2_mem.py --census     # GObjects: count + first objects
+python3 hw2_mem.py --find World # live UWorld instance(s)
+
+# in a match:
+python3 hw2_players.py          # local player name + position
+python3 hw2_w2s.py              # camera POV, projection self-check
 ```

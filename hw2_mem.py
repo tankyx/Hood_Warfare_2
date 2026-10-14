@@ -28,6 +28,13 @@ GOBJECTS_RVA = 0x0AFB3500
 ITEM_STRIDE = 0x18
 ITEM_OBJ_OFF = 0x08
 
+# Recovered gameplay offsets (verified live in a match on map Downtown_Conquest).
+USTRUCT_SUPER_OFF = 0x40          # UStruct::SuperStruct
+SCENE_TRANSLATION_OFF = 0x110     # USceneComponent world translation (FVector = 3 doubles)
+ACTOR_ROOT_COMPONENT_OFF = 0x1B8  # AActor::RootComponent
+PLAYERCONTROLLER_PLAYERSTATE_OFF = 0x2B0
+PLAYERCONTROLLER_PAWN_OFF = 0x2E8
+
 
 class Process:
     """A handle on the running game: find the pid, map the module, read memory."""
@@ -254,6 +261,29 @@ class Objects:
     def class_name(self, obj: int) -> str:
         cls = self.class_of(obj)
         return self.names.resolve(self.proc.u32(cls + 0x18)) if cls else ""
+
+    def class_chain(self, obj: int, depth: int = 16) -> list:
+        """Class names from the object's class up the SuperStruct chain."""
+        out, seen = [], set()
+        cls = self.class_of(obj)
+        while cls and cls not in seen and len(out) < depth:
+            seen.add(cls)
+            out.append(self.names.resolve(self.proc.u32(cls + 0x18)))
+            cls = self.proc.u64(cls + USTRUCT_SUPER_OFF)
+        return out
+
+    def is_a(self, obj: int, base: str) -> bool:
+        return base in self.class_chain(obj)
+
+    def translation(self, obj: int):
+        """World position of an AActor, via RootComponent -> ComponentToWorld."""
+        root = self.proc.u64(obj + ACTOR_ROOT_COMPONENT_OFF)
+        if not root:
+            return None
+        raw = self.proc.read(root + SCENE_TRANSLATION_OFF, 24)
+        if len(raw) != 24:
+            return None
+        return struct.unpack("<ddd", raw)
 
 
 if __name__ == "__main__":

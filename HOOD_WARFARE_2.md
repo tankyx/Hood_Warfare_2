@@ -64,12 +64,40 @@ being `Package /Script/CoreUObject`, `Class Object`, `Package /Script/Engine`,
 
 ## World & actors
 
-_(filled in by Task 3)_
+Class inheritance is walked via `UStruct::SuperStruct` at **`+0x40`**, so
+Blueprint subclasses (`BP_BasePlayerController_C`, `BP_AI_PlayerController_C`)
+map back to their engine bases.
+
+The live `UWorld` is the `World`-class object named after the map — during a
+match, `Downtown_Conquest`. Verified: `python3 hw2_mem.py --find World`.
 
 ## Players
 
-_(filled in by Task 4)_
+| field | offset |
+|---|---|
+| `APlayerController.PlayerState` | `+0x2B0` |
+| `APlayerController.Pawn` | `+0x2E8` |
+| `AActor.RootComponent` | `+0x1B8` |
+| `USceneComponent` world translation | `+0x110` (3 × **double** — UE5 Large World Coordinates) |
+| `APlayerState` player name | an `FString`, found by scan |
+
+There is no separate `GameState` object in this build; the per-player data hangs
+off the controllers. Verified in a match by `python3 hw2_players.py`:
+
+```
+local BP_BasePlayerController_C  name='TONKYX'  pos=(3900, -12700, 71)
+```
 
 ## Camera & projection
 
-_(filled in by Task 5)_
+`APlayerCameraManager + 0x350` is an `FMinimalViewInfo`:
+
+| field | offset |
+|---|---|
+| `Location` | `+0x00` (3 × double) |
+| `Rotation` (pitch, yaw, roll) | `+0x18` (3 × double, degrees) |
+| `FOV` | `+0x30` (float) |
+
+Projection treats `FOV` as **horizontal** (divide by aspect for the vertical
+scale). Verified by `python3 hw2_w2s.py`: a point 500 units along the camera's
+forward vector lands exactly at screen centre `(960, 540)`.
