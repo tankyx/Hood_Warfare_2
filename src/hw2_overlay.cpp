@@ -169,10 +169,27 @@ int main(int argc, char **argv) {
     auto fpsT0 = std::chrono::steady_clock::now();
     int printed = 0;
 
+    // The full GObjects scan is expensive; run it every ~1.5 s and read only the
+    // cached player addresses in between.
+    std::vector<uintptr_t> actors;
+    uintptr_t camMgr = 0, localPawn = 0;
+    auto lastScan = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+
     while (true) {
         const auto t0 = std::chrono::steady_clock::now();
-        const hw2::Camera cam = rd.camera();
-        const std::vector<hw2::Player> players = rd.players();
+        if (actors.empty() ||
+            std::chrono::duration_cast<std::chrono::milliseconds>(t0 - lastScan).count() > 1500) {
+            rd.scanActors(camMgr, localPawn, actors);
+            lastScan = t0;
+        }
+        const hw2::Camera cam = camMgr ? rd.readCameraAt(camMgr) : hw2::Camera{};
+        std::vector<hw2::Player> players;
+        players.reserve(actors.size());
+        for (uintptr_t a : actors) {
+            hw2::Player p = rd.readPlayer(a);
+            p.local = (a == localPawn);
+            players.push_back(std::move(p));
+        }
 
         boxes.clear();
         shapes.clear();

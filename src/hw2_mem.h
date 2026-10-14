@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <dirent.h>
@@ -201,22 +202,92 @@ public:
     }
 
     Camera camera() const {
-        Camera cam;
+        const uintptr_t cam = findCameraManager();
+        return cam ? readCameraAt(cam) : Camera{};
+    }
+
+    // ---- cheap, cache-friendly access (the expensive full scan runs rarely) ----
+
+    // One full pass over GObjects. Expensive (tens of thousands of reads), so
+    // callers should run it every second or two and cache the result.
+    void scanActors(uintptr_t &camMgr, uintptr_t &localPawn,
+                    std::vector<uintptr_t> &actors) const {
+        actors.clear();
+        camMgr = 0;
+        localPawn = 0;
         const int32_t n = objectCount();
         for (int32_t i = 0; i < n; ++i) {
             const uintptr_t o = objectAt(i);
-            if (!o || className(o) != "PlayerCameraManager" || nameOf(o).rfind("Default__", 0) == 0)
+            if (!o) continue;
+            const uintptr_t cls = classOf(o);
+            if (!cls) continue;
+            if (!camMgr && isClassNamed(cls, "PlayerCameraManager")) {
+                if (nameOf(o).rfind("Default__", 0) != 0) {
+                    camMgr = o;
+                    const uintptr_t ctrl = u64(o + kOffCamOwner);
+                    if (ctrl) localPawn = u64(ctrl + kOffCtrlPawn);
+                }
                 continue;
-            const uintptr_t pov = o + kOffCamPov;
-            if (read(pov, &cam.loc, sizeof(double) * 3) &&
-                read(pov + 0x18, &cam.rot, sizeof(double) * 3) &&
-                read(pov + 0x30, &cam.fov, sizeof(float))) {
-                cam.ok = std::isfinite(cam.loc.x) && cam.fov > 1.0f && cam.fov < 179.0f;
-                if (cam.ok) return cam;
             }
+            if (!isCharacterClass(cls)) continue;
+            if (nameOf(o).rfind("Default__", 0) == 0) continue;
+            if (!u64(o + kOffRootComponent)) continue;   // not spawned yet
+            actors.push_back(o);
+        }
+    }
+
+    Player readPlayer(uintptr_t o) const {
+        Player p;
+        p.obj = o;
+        p.cls = className(o);
+        p.name = nameOf(o);
+        p.pos = translation(o);
+        return p;
+    }
+
+    Camera readCameraAt(uintptr_t camMgr) const {
+        Camera cam;
+        const uintptr_t pov = camMgr + kOffCamPov;
+        if (read(pov, &cam.loc, sizeof(double) * 3) &&
+            read(pov + 0x18, &cam.rot, sizeof(double) * 3) &&
+            read(pov + 0x30, &cam.fov, sizeof(float))) {
+            cam.ok = std::isfinite(cam.loc.x) && cam.fov > 1.0f && cam.fov < 179.0f;
         }
         return cam;
     }
+
+private:
+    bool isClassNamed(uintptr_t cls, const char *name) const { return nameOf(cls) == name; }
+
+    // Cache class-ptr -> "is a Character subclass". The SuperStruct walk costs
+    // several reads, and the same handful of classes repeats for every object.
+    bool isCharacterClass(uintptr_t cls) const {
+        const auto it = _charClass.find(cls);
+        if (it != _charClass.end()) return it->second;
+        bool is = false;
+        uintptr_t c = cls;
+        for (int guard = 0; c && guard < 16; ++guard) {
+            const std::string n = nameOf(c);
+            if (n == "Character") { is = true; break; }
+            if (n == "ActorComponent" || n == "SceneComponent") break;
+            c = u64(c + kOffSuper);
+        }
+        _charClass[cls] = is;
+        return is;
+    }
+
+    uintptr_t findCameraManager() const {
+        const int32_t n = objectCount();
+        for (int32_t i = 0; i < n; ++i) {
+            const uintptr_t o = objectAt(i);
+            if (o && className(o) == "PlayerCameraManager" &&
+                nameOf(o).rfind("Default__", 0) != 0)
+                return o;
+        }
+        return 0;
+    }
+
+public:
 
 private:
     static int findPid() {
@@ -262,6 +333,7 @@ private:
     uintptr_t _base = 0;
     uintptr_t _objects = 0;
     uintptr_t _blocks = 0;
+    mutable std::unordered_map<uintptr_t, bool> _charClass;
 };
 
 }  // namespace hw2
