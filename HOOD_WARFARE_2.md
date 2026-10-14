@@ -15,39 +15,52 @@ injection. Every address is `module_base + RVA` unless stated otherwise.
 ## Module base
 
 `0x140000000` on the observed launch — the PE preferred image base, but treat it
-as runtime data: read it from `/proc/<pid>/maps` (the harness does), never
-hardcode it.
-
-Status: **verified** by `python3 hw2_mem.py` (reads `MZ` at the base).
-
-| symbol | value | how derived | status |
-|---|---|---|---|
-| module base | `0x140000000` | `/proc/<pid>/maps` first mapping of the exe | verified |
+as runtime data: read it from `/proc/<pid>/maps`, never hardcode it. Verified by
+`python3 hw2_mem.py` (reads `MZ` at the base).
 
 ## Reflection globals
 
-### FNamePool (GNames) — verified
-
 | symbol | value | how derived | status |
 |---|---|---|---|
-| `FNamePool.Blocks[0]` | `module_base + 0x0AEE54D0` | the only `.data` pointer equal to the pool's block-array base; block 0 decodes to the built-in FName sequence | verified |
+| `FNamePool.Blocks[0]` | `module_base + 0x0AEE54D0` | pointer to a block whose first entries are the built-in FNames; also the `GNAM_ES53_1` AOB target (`lea rcx,[FNamePool]`) | verified |
+| `GObjects` (`FUObjectArray`) | `module_base + 0x0AFB3500` | `GOBJ_ES53_1` AOB (`sub rsp,28; lea rcx,[GUObjectArray]; call FUObjectArray::FUObjectArray`), then live-scored over 96 candidates | verified |
 
-UE 5.8 changed the `FNameEntry` header. It is **`(Len << 6) | flags`**, with
-`bIsWide` in bit 0 — *not* the classic `(Len << 1) | bIsWide`. Entries are
-2-byte aligned with a `0x00` pad after an odd-length name. Decode with
-`block = index >> 16`, `offset = index & 0xFFFF`, `header = u16(block_base + offset)`;
-the name follows the 2-byte header, `Len` bytes (or `Len` UTF-16 units when wide).
+### FNamePool (GNames)
 
-Verified by `python3 hw2_mem.py --names`, which reproduces the built-in sequence
-`None / ByteProperty / IntProperty / BoolProperty` at `0x0 / 0x6 / 0x14 / 0x22`.
+UE 5.8 changed the `FNameEntry` header **and** the index encoding:
 
-### FUObjectArray (GObjects) — pending
+- Header = **`(Len << 6) | flags`**, bit 0 = `bIsWide` — *not* the classic `(Len << 1)`.
+- Entry byte offset = **`(index & 0xFFFF) * 2`** (stride 2), block = `index >> 16`.
+- Entries are 2-byte aligned with a `0x00` pad after an odd-length name.
 
-UE 5.8 also changed the object-array layout: the classic
-`Objects`/`NumElements`/`NumChunks` offsets do not hold, and no `.data` pointer
-yields the old `FUObjectArray` fingerprint. `UObject` vtables live in **`.rdata`**
-(not `.text`); a candidate `FUObjectItem` chunk (stride `0x18`) was observed at
-`0x7ff43e490000`. Exact layout still being derived (background Ghidra pass).
+Verified by `python3 hw2_mem.py --names`: `0x0/0x3/0xA/0x11` →
+`None / ByteProperty / IntProperty / BoolProperty`.
+
+### FUObjectArray (GObjects) and FUObjectItem
+
+UE 5.8 also reordered the object array. Unlike UE 5.0–5.7 (`Objects` at `+0x10`,
+`NumElements` at `+0x24`), **UE 5.8 puts `ObjObjects` first**:
+
+| field | offset |
+|---|---|
+| `Objects` (chunk table ptr) | `+0x00` |
+| `NumElements` | `+0x08` |
+| `MaxElements` | `+0x0C` |
+| `NumChunks` | `+0x10` |
+| `MaxChunks` | `+0x14` |
+
+And the `FUObjectItem` (UE 5.7+ reordered) is **0x18 bytes with the `UObject*`
+at `+0x08`** (flags/refcount first), not `+0x00`.
+
+Read path: `chunk = *(Objects + (index >> 16) * 8)`;
+`item = chunk + (index & 0xFFFF) * 0x18`; `obj = *(item + 0x08)`.
+
+`UObject` fields used: `ClassPrivate` at `+0x10`, `NamePrivate` (FName
+comparison index) at `+0x18`, `OuterPrivate` at `+0x20`.
+
+Verified by `python3 hw2_mem.py --census`: **81,496 objects**, the first ones
+being `Package /Script/CoreUObject`, `Class Object`, `Package /Script/Engine`,
+`Class Actor`.
 
 ## World & actors
 

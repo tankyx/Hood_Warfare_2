@@ -12,10 +12,21 @@ import sys
 MODULE_NAME = "HW2-HoodWarfare2-Win64-Shipping.exe"
 
 # FNamePool: address of `Blocks[0]`. UE 5.8 FNameEntry header is
-# `(Len << 6) | flags` (bit0 = bIsWide) — NOT the classic `Len << 1`.
-# Verified live: indices 0x0, 0x6, 0x14, 0x22 resolve to the built-in
-# FName sequence None / ByteProperty / IntProperty / BoolProperty.
+# `(Len << 6) | flags` (bit0 = bIsWide) — NOT the classic `Len << 1` — and the
+# entry offset is `(index & 0xFFFF) * FNAME_STRIDE` (stride 2 on this build).
+# Verified live: 0x3/0xA/0x11 -> ByteProperty/IntProperty/BoolProperty.
 GNAMES_BLOCKS_RVA = 0x0AEE54D0
+FNAME_STRIDE = 2
+
+# FUObjectArray (`GObjects`) — located via the GOBJ_ES53_1 AOB signature
+# (`sub rsp,28; lea rcx,[GUObjectArray]; call FUObjectArray::FUObjectArray`).
+# UE 5.8 geometry: ObjObjects FIRST — {Objects +0x00, Num +0x08, Max +0x0C,
+# NumChunks +0x10, MaxChunks +0x14}; FUObjectItem stride 0x18 with the UObject*
+# at +0x08 (UE 5.7+ reordered item). Verified live: 81,496 objects, first ones
+# Package /Script/CoreUObject, Class Object, Package /Script/Engine, Class Actor.
+GOBJECTS_RVA = 0x0AFB3500
+ITEM_STRIDE = 0x18
+ITEM_OBJ_OFF = 0x08
 
 
 class Process:
@@ -144,6 +155,8 @@ def main() -> int:
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--names", action="store_true", help="resolve a few built-in FNames")
+    ap.add_argument("--census", action="store_true", help="enumerate GObjects")
+    ap.add_argument("--find", metavar="CLASS", help="count objects of a class")
     args = ap.parse_args()
 
     proc = Process()
@@ -158,13 +171,29 @@ def main() -> int:
 
     if args.names:
         names = Names(proc)
-        expected = {0x0: "None", 0x6: "ByteProperty", 0x14: "IntProperty", 0x22: "BoolProperty"}
+        expected = {0x0: "None", 0x3: "ByteProperty", 0xA: "IntProperty", 0x11: "BoolProperty"}
         for idx, want in expected.items():
             got = names.resolve(idx)
             status = "ok" if got == want else "BAD"
             print(f"  FName[0x{idx:04x}] = {got!r} ({status})")
         if any(names.resolve(i) != w for i, w in expected.items()):
             return 1
+
+    if args.census or args.find:
+        names = Names(proc)
+        objects = Objects(proc, names)
+        total = objects.count()
+        print(f"GObjects=0x{objects.addr:x} count={total} max={objects.max()}")
+        if args.find:
+            hits = [objects.name_of(objects.at(i))
+                    for i in range(total)
+                    if objects.class_name(objects.at(i)) == args.find]
+            print(f"  class {args.find!r}: {len(hits)} objects")
+            for nm in hits[:10]:
+                print(f"    {nm!r}")
+        else:
+            for i in range(min(total, 8)):
+                print(f"  [{i}] {objects.name_of(objects.at(i))!r} ({objects.class_name(objects.at(i))})")
     return 0
 
 
@@ -176,7 +205,9 @@ class Names:
         self.blocks = proc.base() + blocks_rva
 
     def resolve(self, index: int) -> str:
-        block, offset = index >> 16, index & 0xFFFF
+        if index <= 0:
+            return "None" if index == 0 else ""
+        block, offset = index >> 16, (index & 0xFFFF) * FNAME_STRIDE
         if block > 256:  # bounds check (Review Focus 5)
             return ""
         base = self.proc.u64(self.blocks + block * 8)
@@ -193,6 +224,36 @@ class Names:
             return raw.decode("utf-16-le" if header & 1 else "latin1")
         except UnicodeDecodeError:
             return ""
+
+
+class Objects:
+    """FUObjectArray (UE 5.8): ObjObjects first; item stride 0x18, object at +0x08."""
+
+    def __init__(self, proc: "Process", names: "Names", array_rva: int = GOBJECTS_RVA):
+        self.proc = proc
+        self.names = names
+        self.addr = proc.base() + array_rva
+
+    def count(self) -> int:
+        return self.proc.i32(self.addr + 0x08)
+
+    def max(self) -> int:
+        return self.proc.i32(self.addr + 0x0C)
+
+    def at(self, index: int) -> int:
+        chunk_table = self.proc.u64(self.addr)
+        chunk = self.proc.u64(chunk_table + (index >> 16) * 8)
+        return self.proc.u64(chunk + (index & 0xFFFF) * ITEM_STRIDE + ITEM_OBJ_OFF)
+
+    def name_of(self, obj: int) -> str:
+        return self.names.resolve(self.proc.u32(obj + 0x18))
+
+    def class_of(self, obj: int) -> int:
+        return self.proc.u64(obj + 0x10)
+
+    def class_name(self, obj: int) -> str:
+        cls = self.class_of(obj)
+        return self.names.resolve(self.proc.u32(cls + 0x18)) if cls else ""
 
 
 if __name__ == "__main__":
