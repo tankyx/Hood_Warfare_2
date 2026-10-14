@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Read-only memory layer for Hood Warfare 2 (UE 5.8.3, Steam appid 5155360).
+
+Everything here reads the game's memory through /proc/<pid>/mem. No ptrace, no
+injection, no writing. Addresses are always expressed as module_base + RVA.
+"""
+import glob
+import os
+import struct
+import sys
+
+MODULE_NAME = "HW2-HoodWarfare2-Win64-Shipping.exe"
+
+
+class Process:
+    """A handle on the running game: find the pid, map the module, read memory."""
+
+    def __init__(self, pid=None):
+        self.pid = pid if pid is not None else self.find_pid(MODULE_NAME)
+        self._fd = -1
+
+    @staticmethod
+    def find_pid(module_name=MODULE_NAME):
+        """Return the pid whose /proc/<pid>/maps maps `module_name`.
+
+        Matches the mapped file path, not /proc/<pid>/comm: the Wine thread
+        running the game is named "GameThread", not after the executable.
+        """
+        for maps in glob.glob("/proc/[0-9]*/maps"):
+            try:
+                with open(maps, "r", errors="replace") as fh:
+                    for line in fh:
+                        path = line.rstrip("\n").split(None, 5)[-1]
+                        if path.endswith(module_name):
+                            return int(maps.split("/")[2])
+            except OSError:
+                continue
+        return None
+
+    def _maps(self):
+        try:
+            with open(f"/proc/{self.pid}/maps", "r", errors="replace") as fh:
+                for line in fh:
+                    parts = line.rstrip("\n").split(None, 5)
+                    if len(parts) == 6:
+                        yield parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+        except OSError:
+            return
+
+    def open(self):
+        if self.pid is None:
+            print(f"game not running: {MODULE_NAME} not found in any /proc/<pid>/maps",
+                  file=sys.stderr)
+            return False
+        try:
+            self._fd = os.open(f"/proc/{self.pid}/mem", os.O_RDONLY)
+        except PermissionError:
+            print(f"cannot read /proc/{self.pid}/mem: permission denied. "
+                  "Allow attaches with `sudo sysctl kernel.yama.ptrace_scope=0` "
+                  "(or run under a process that is the game's parent).", file=sys.stderr)
+            return False
+        except OSError as exc:
+            print(f"cannot open /proc/{self.pid}/mem: {exc}", file=sys.stderr)
+            return False
+        return True
+
+    def close(self):
+        if self._fd >= 0:
+            os.close(self._fd)
+            self._fd = -1
+
+    def base(self):
+        """Lowest mapping address of the game module (the PE preferred base)."""
+        low = None
+        for rng, _perms, _off, _dev, _inode, path in self._maps():
+            if not path.endswith(MODULE_NAME):
+                continue
+            start = int(rng.split("-")[0], 16)
+            if low is None or start < low:
+                low = start
+        return low or 0
+
+    def read(self, addr, n):
+        if self._fd < 0 or addr <= 0 or n <= 0:
+            return b""
+        try:
+            data = os.pread(self._fd, n, addr)
+        except OSError:
+            return b""
+        return data if len(data) == n else b""
+
+    def _unpack(self, fmt, addr):
+        size = struct.calcsize(fmt)
+        data = self.read(addr, size)
+        return struct.unpack(fmt, data)[0] if data else 0
+
+    def u8(self, addr):
+        return self._unpack("<B", addr)
+
+    def u16(self, addr):
+        return self._unpack("<H", addr)
+
+    def u32(self, addr):
+        return self._unpack("<I", addr)
+
+    def u64(self, addr):
+        return self._unpack("<Q", addr)
+
+    def i32(self, addr):
+        return self._unpack("<i", addr)
+
+    def f32(self, addr):
+        return self._unpack("<f", addr)
+
+    def cstr(self, addr, maxlen=64):
+        out = bytearray()
+        while len(out) < maxlen:
+            ch = self.read(addr + len(out), 1)
+            if not ch or ch == b"\x00":
+                break
+            out += ch
+        return out.decode("latin-1")
+
+    def fstring(self, addr):
+        """A UE FString: TArray<wchar_t> — data ptr at +0x0, num i32 at +0x8."""
+        data = self.u64(addr)
+        num = self.i32(addr + 8)
+        if not data or num <= 1 or num > 4096:
+            return ""
+        raw = self.read(data, num * 2)
+        try:
+            return raw.decode("utf-16-le").rstrip("\x00")
+        except UnicodeDecodeError:
+            return ""
+
+
+def main() -> int:
+    proc = Process()
+    if not proc.open():
+        return 1
+    base = proc.base()
+    header = proc.read(base, 2)
+    print(f"pid={proc.pid} base=0x{base:x} header={header!r}")
+    if header != b"MZ":
+        print(f"unexpected header at module base: {header!r}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
