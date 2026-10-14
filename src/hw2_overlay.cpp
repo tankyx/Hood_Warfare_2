@@ -36,7 +36,7 @@ struct Options {
     bool dump = false;
     bool labels = true;
     bool aim = false;
-    float aimFov = 20.0f;       // aim cone, degrees from crosshair
+    float aimFov = 6.0f;        // aim cone, degrees from crosshair
     float aimScale = 1.0f;
     bool aimDebug = false;
     int hz = 120;
@@ -152,10 +152,10 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "aim: no physical USB HID mouse found (install the udev rule)\n");
         else
             std::fprintf(stderr, "aim: %s\n", mouse.path().c_str());
-        if (!lmb.open(BTN_LEFT))
-            std::fprintf(stderr, "aim: no mouse for the LMB gate\n");
+        if (!lmb.open(BTN_RIGHT))
+            std::fprintf(stderr, "aim: no mouse for the RMB gate\n");
         else
-            std::fprintf(stderr, "aim gate: %s (%s)\n", lmb.path(), lmb.name());
+            std::fprintf(stderr, "aim gate: %s (%s) — aim engages on RMB\n", lmb.path(), lmb.name());
     }
 
     std::vector<std::string> labelNames;
@@ -288,7 +288,7 @@ int main(int argc, char **argv) {
 
         if (opt.aim && cam.ok && mouse.ok() && lmb.ok() && lmb.down() &&
             bestMag < aimMaxPx && bestMag > 2.0f) {
-            const float gain = 0.10f * opt.aimScale;
+            const float gain = 0.05f * opt.aimScale;
             const int dx = static_cast<int>(std::lround(bestOx * gain));
             const int dy = static_cast<int>(std::lround(bestOy * gain));
             // Re-send the physical button state: a HID report replaces the whole
