@@ -45,6 +45,11 @@ constexpr uint32_t kOffTranslation = 0x110; // USceneComponent world translation
 constexpr uint32_t kOffCamPov = 0x350;    // APlayerCameraManager -> FMinimalViewInfo
 constexpr uint32_t kOffCtrlPawn = 0x2E8;
 constexpr uint32_t kOffCamOwner = 0x158;
+// Recovered via UClass reflection (property names): PawnTeam is the real team
+// (0/1), and AC_Health_C carries Health + bDead.
+constexpr uint32_t kOffPawnTeam = 0x910;
+constexpr uint32_t kOffHealthComp = 0x6C0;
+constexpr uint32_t kOffDead = 0xF8;
 
 struct Vec3 {
     double x = 0, y = 0, z = 0;
@@ -55,6 +60,8 @@ struct Player {
     std::string cls;
     std::string name;
     Vec3 pos;
+    int team = -1;
+    bool dead = false;
     bool local = false;
 };
 
@@ -242,6 +249,9 @@ public:
         p.cls = className(o);
         p.name = nameOf(o);
         p.pos = translation(o);
+        p.team = i32(o + kOffPawnTeam);
+        const uintptr_t hc = u64(o + kOffHealthComp);
+        if (hc) p.dead = u8(hc + kOffDead) != 0;
         return p;
     }
 

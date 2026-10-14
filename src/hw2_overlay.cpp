@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
             p.local = (a == localPawn);
             players.push_back(std::move(p));
         }
-        const std::string localFaction = localPawn ? factionOf(rd.className(localPawn)) : "";
+        const int localTeam = localPawn ? rd.readPlayer(localPawn).team : -1;
 
         boxes.clear();
         shapes.clear();
@@ -190,6 +190,7 @@ int main(int argc, char **argv) {
 
         if (cam.ok) {
             for (const auto &p : players) {
+                if (p.dead) continue;   // don't box corpses
                 const double d = dist(p.pos, cam.loc);
                 if (d > opt.maxDist) continue;
                 // The actor origin is the capsule centre (~hip), so the box spans
@@ -204,7 +205,7 @@ int main(int argc, char **argv) {
                 const float bx = (hx + fx) / 2.0f - bw / 2.0f;
                 const float by = std::min(hy, fy);
 
-                const bool ally = (factionOf(p.cls) == localFaction);
+                const bool ally = (p.team >= 0 && p.team == localTeam);
                 const uint32_t color = p.local ? 0xFF00FFFFu
                                      : ally    ? 0xFF33FF55u
                                                : 0xFFFF3030u;
@@ -243,13 +244,13 @@ int main(int argc, char **argv) {
         }
 
         if (opt.dump) {
-            std::printf("cam=(%8.1f,%8.1f,%8.1f) fov=%.1f players=%zu local-faction=%s\n",
-                        cam.loc.x, cam.loc.y, cam.loc.z, cam.fov, players.size(), localFaction.c_str());
+            std::printf("cam=(%8.1f,%8.1f,%8.1f) fov=%.1f players=%zu local-team=%d\n",
+                        cam.loc.x, cam.loc.y, cam.loc.z, cam.fov, players.size(), localTeam);
             for (const auto &p : players)
-                std::printf("  %-34s %-12s %s pos=(%9.1f,%9.1f,%9.1f)\n", p.cls.c_str(),
-                            factionOf(p.cls).c_str(),
-                            p.local ? "YOU" : (factionOf(p.cls) == localFaction ? "ALLY" : "HOSTILE"),
-                            p.pos.x, p.pos.y, p.pos.z);
+                std::printf("  %-34s team=%d %-12s %s dead=%d pos=(%9.1f,%9.1f,%9.1f)\n", p.cls.c_str(),
+                            p.team, factionOf(p.cls).c_str(),
+                            p.local ? "YOU" : (p.team == localTeam ? "ALLY" : "HOSTILE"),
+                            (int)p.dead, p.pos.x, p.pos.y, p.pos.z);
         } else {
             overlay.setLabelNames(labelNames);
             overlay.setDetections(std::move(boxes));
