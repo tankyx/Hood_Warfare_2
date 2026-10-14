@@ -50,6 +50,8 @@ constexpr uint32_t kOffCamOwner = 0x158;
 constexpr uint32_t kOffPawnTeam = 0x910;
 constexpr uint32_t kOffHealthComp = 0x6C0;
 constexpr uint32_t kOffDead = 0xF8;
+constexpr uint32_t kOffHealth = 0xC8;     // AC_Health_C::Health    (double)
+constexpr uint32_t kOffMaxHealth = 0xD0;  // AC_Health_C::MaxHealth (double)
 
 struct Vec3 {
     double x = 0, y = 0, z = 0;
@@ -63,6 +65,8 @@ struct Player {
     int team = -1;
     bool dead = false;
     bool local = false;
+    double hp = 0.0;
+    double maxHp = 0.0;
 };
 
 struct Camera {
@@ -251,7 +255,11 @@ public:
         p.pos = translation(o);
         p.team = i32(o + kOffPawnTeam);
         const uintptr_t hc = u64(o + kOffHealthComp);
-        if (hc) p.dead = u8(hc + kOffDead) != 0;
+        if (hc) {
+            p.dead = u8(hc + kOffDead) != 0;
+            read(hc + kOffHealth, &p.hp, sizeof(double));
+            read(hc + kOffMaxHealth, &p.maxHp, sizeof(double));
+        }
         return p;
     }
 

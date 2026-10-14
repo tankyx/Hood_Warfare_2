@@ -249,6 +249,27 @@ int main(int argc, char **argv) {
                 box.color = color;
                 shapes.push_back(box);
 
+                // HP bar to the left of the box: full-height dark track with a
+                // bottom-anchored fill, green -> yellow -> red by ratio.
+                if (p.maxHp > 0.0) {
+                    const float frac = static_cast<float>(std::clamp(p.hp / p.maxHp, 0.0, 1.0));
+                    const float barX = bx - 6.0f, barW = 3.0f;
+                    WaylandOverlay::Shape track;
+                    track.kind = WaylandOverlay::Shape::Filled;
+                    track.x0 = barX; track.y0 = by;
+                    track.x1 = barX + barW; track.y1 = by + bh;
+                    track.color = 0x90000000u;
+                    shapes.push_back(track);
+                    WaylandOverlay::Shape fill;
+                    fill.kind = WaylandOverlay::Shape::Filled;
+                    fill.x0 = barX; fill.y0 = by + bh * (1.0f - frac);
+                    fill.x1 = barX + barW; fill.y1 = by + bh;
+                    fill.color = frac > 0.6f ? 0xFF33FF33u
+                               : frac > 0.3f ? 0xFFFFE000u
+                                            : 0xFFFF3030u;
+                    shapes.push_back(fill);
+                }
+
                 if (opt.labels) {
                     WaylandOverlay::DetectionBox t;
                     t.x = hx; t.y = hy; t.w = 0; t.h = 0;   // label only
@@ -256,7 +277,8 @@ int main(int argc, char **argv) {
                     t.confidence = 1.0f;
                     const char *tag = p.local ? "YOU " : (ally ? "[A] " : "[H] ");
                     labelNames.push_back(std::string(tag) + p.name + " " +
-                                         std::to_string(static_cast<int>(d / 100.0f + 0.5f)) + "m");
+                                         std::to_string(static_cast<int>(d / 100.0f + 0.5f)) + "m " +
+                                         std::to_string(static_cast<int>(p.hp + 0.5)) + "hp");
                     boxes.push_back(t);
                 }
 
