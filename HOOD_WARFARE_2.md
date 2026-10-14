@@ -26,7 +26,28 @@ Status: **verified** by `python3 hw2_mem.py` (reads `MZ` at the base).
 
 ## Reflection globals
 
-_(filled in by Task 2)_
+### FNamePool (GNames) — verified
+
+| symbol | value | how derived | status |
+|---|---|---|---|
+| `FNamePool.Blocks[0]` | `module_base + 0x0AEE54D0` | the only `.data` pointer equal to the pool's block-array base; block 0 decodes to the built-in FName sequence | verified |
+
+UE 5.8 changed the `FNameEntry` header. It is **`(Len << 6) | flags`**, with
+`bIsWide` in bit 0 — *not* the classic `(Len << 1) | bIsWide`. Entries are
+2-byte aligned with a `0x00` pad after an odd-length name. Decode with
+`block = index >> 16`, `offset = index & 0xFFFF`, `header = u16(block_base + offset)`;
+the name follows the 2-byte header, `Len` bytes (or `Len` UTF-16 units when wide).
+
+Verified by `python3 hw2_mem.py --names`, which reproduces the built-in sequence
+`None / ByteProperty / IntProperty / BoolProperty` at `0x0 / 0x6 / 0x14 / 0x22`.
+
+### FUObjectArray (GObjects) — pending
+
+UE 5.8 also changed the object-array layout: the classic
+`Objects`/`NumElements`/`NumChunks` offsets do not hold, and no `.data` pointer
+yields the old `FUObjectArray` fingerprint. `UObject` vtables live in **`.rdata`**
+(not `.text`); a candidate `FUObjectItem` chunk (stride `0x18`) was observed at
+`0x7ff43e490000`. Exact layout still being derived (background Ghidra pass).
 
 ## World & actors
 

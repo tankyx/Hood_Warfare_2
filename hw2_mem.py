@@ -11,6 +11,12 @@ import sys
 
 MODULE_NAME = "HW2-HoodWarfare2-Win64-Shipping.exe"
 
+# FNamePool: address of `Blocks[0]`. UE 5.8 FNameEntry header is
+# `(Len << 6) | flags` (bit0 = bIsWide) — NOT the classic `Len << 1`.
+# Verified live: indices 0x0, 0x6, 0x14, 0x22 resolve to the built-in
+# FName sequence None / ByteProperty / IntProperty / BoolProperty.
+GNAMES_BLOCKS_RVA = 0x0AEE54D0
+
 
 class Process:
     """A handle on the running game: find the pid, map the module, read memory."""
@@ -135,6 +141,11 @@ class Process:
 
 
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--names", action="store_true", help="resolve a few built-in FNames")
+    args = ap.parse_args()
+
     proc = Process()
     if not proc.open():
         return 1
@@ -144,7 +155,44 @@ def main() -> int:
     if header != b"MZ":
         print(f"unexpected header at module base: {header!r}", file=sys.stderr)
         return 1
+
+    if args.names:
+        names = Names(proc)
+        expected = {0x0: "None", 0x6: "ByteProperty", 0x14: "IntProperty", 0x22: "BoolProperty"}
+        for idx, want in expected.items():
+            got = names.resolve(idx)
+            status = "ok" if got == want else "BAD"
+            print(f"  FName[0x{idx:04x}] = {got!r} ({status})")
+        if any(names.resolve(i) != w for i, w in expected.items()):
+            return 1
     return 0
+
+
+class Names:
+    """FNamePool resolver. UE 5.8: header = (Len << 6) | flags, bit0 = bIsWide."""
+
+    def __init__(self, proc: "Process", blocks_rva: int = GNAMES_BLOCKS_RVA):
+        self.proc = proc
+        self.blocks = proc.base() + blocks_rva
+
+    def resolve(self, index: int) -> str:
+        block, offset = index >> 16, index & 0xFFFF
+        if block > 256:  # bounds check (Review Focus 5)
+            return ""
+        base = self.proc.u64(self.blocks + block * 8)
+        if not base:
+            return ""
+        header = self.proc.u16(base + offset)
+        length = header >> 6
+        if length <= 0 or length > 256:
+            return ""
+        raw = self.proc.read(base + offset + 2, length * 2 if header & 1 else length)
+        if not raw:
+            return ""
+        try:
+            return raw.decode("utf-16-le" if header & 1 else "latin1")
+        except UnicodeDecodeError:
+            return ""
 
 
 if __name__ == "__main__":
