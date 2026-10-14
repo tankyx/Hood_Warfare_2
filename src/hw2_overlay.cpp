@@ -187,8 +187,16 @@ int main(int argc, char **argv) {
         shapes.clear();
         labelNames.clear();
         float bestOx = 0, bestOy = 0, bestMag = 1e30f;
+        double aimMaxPx = 0.0;
 
         if (cam.ok) {
+            if (opt.aim) {
+                // Cone half-angle in pixels: tan(aimFov/2) * focal.
+                const double aspect = static_cast<double>(opt.renderW) / opt.renderH;
+                const double fovY = 2.0 * std::atan(std::tan(cam.fov * M_PI / 360.0) / aspect);
+                const double focal = (opt.renderH / 2.0) / std::tan(fovY / 2.0);
+                aimMaxPx = std::tan(opt.aimFov * M_PI / 360.0) * focal;
+            }
             for (const auto &p : players) {
                 if (p.dead) continue;   // don't box corpses
                 const double d = dist(p.pos, cam.loc);
@@ -232,11 +240,12 @@ int main(int argc, char **argv) {
                 }
 
                 if (p.local) continue;  // aim only at others
-                if (!ally) {
+                if (!ally && aimMaxPx > 0.0) {
                     const float cx = hx - opt.renderW / 2.0f;
                     const float cy = hy - opt.renderH / 2.0f;
-                    if (std::sqrt(cx * cx + cy * cy) < bestMag) {
-                        bestMag = std::sqrt(cx * cx + cy * cy);
+                    const float mag = std::sqrt(cx * cx + cy * cy);
+                    if (mag < aimMaxPx && mag < bestMag) {
+                        bestMag = mag;
                         bestOx = cx; bestOy = cy;
                     }
                 }
@@ -258,10 +267,12 @@ int main(int argc, char **argv) {
             overlay.setStats(0, fps);
         }
 
-        if (opt.aim && mouse.ok() && lmb.ok() && lmb.down() && bestMag < 1e29f) {
-            if (bestMag > 3.0f)
-                mouse.move(static_cast<int>(bestOx * 0.35 * opt.aimScale),
-                           static_cast<int>(bestOy * 0.35 * opt.aimScale));
+        if (opt.aim && cam.ok && mouse.ok() && lmb.ok() && lmb.down() &&
+            bestMag < aimMaxPx && bestMag > 2.0f) {
+            const float gain = 0.35f * opt.aimScale;
+            const int dx = static_cast<int>(std::lround(bestOx * gain));
+            const int dy = static_cast<int>(std::lround(bestOy * gain));
+            if (dx || dy) mouse.move(dx, dy);
         }
 
         if (++fpsFrames >= 30) {
