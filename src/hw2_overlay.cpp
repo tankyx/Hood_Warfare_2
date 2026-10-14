@@ -36,8 +36,9 @@ struct Options {
     bool dump = false;
     bool labels = true;
     bool aim = false;
-    float aimFov = 6.0f;        // aim cone, degrees from crosshair
+    float aimFov = 20.0f;       // aim cone, degrees from crosshair
     float aimScale = 1.0f;
+    bool aimDebug = false;
     int hz = 120;
 };
 
@@ -98,6 +99,7 @@ int main(int argc, char **argv) {
         else if (a == "--max-dist" && i + 1 < argc) opt.maxDist = std::atof(argv[++i]);
         else if (a == "--height" && i + 1 < argc) opt.height = std::atof(argv[++i]);
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
+        else if (a == "--aim-debug") opt.aimDebug = true;
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
             std::printf("usage: %s [--dump] [--aim] [--no-labels] [--render WxH]"
@@ -150,7 +152,10 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "aim: no physical USB HID mouse found (install the udev rule)\n");
         else
             std::fprintf(stderr, "aim: %s\n", mouse.path().c_str());
-        if (!lmb.open(BTN_LEFT)) std::fprintf(stderr, "aim: no mouse for the LMB gate\n");
+        if (!lmb.open(BTN_LEFT))
+            std::fprintf(stderr, "aim: no mouse for the LMB gate\n");
+        else
+            std::fprintf(stderr, "aim gate: %s (%s)\n", lmb.path(), lmb.name());
     }
 
     std::vector<std::string> labelNames;
@@ -273,6 +278,12 @@ int main(int argc, char **argv) {
             const int dx = static_cast<int>(std::lround(bestOx * gain));
             const int dy = static_cast<int>(std::lround(bestOy * gain));
             if (dx || dy) mouse.move(dx, dy);
+        }
+        if (opt.aimDebug && (frames % 60) == 0) {
+            std::fprintf(stderr,
+                         "aim: lmb_ok=%d lmb_down=%d mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s\n",
+                         (int)lmb.ok(), (int)lmb.down(), (int)mouse.ok(), aimMaxPx, bestMag,
+                         bestOx, bestOy, bestMag < aimMaxPx ? "yes" : "no");
         }
 
         if (++fpsFrames >= 30) {

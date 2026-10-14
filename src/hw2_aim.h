@@ -27,30 +27,50 @@ public:
         _code = code;
         DIR *d = ::opendir("/dev/input");
         if (!d) return false;
+        int chosen = -1;
+        std::string chosenPath, chosenName;
         for (dirent *e; (e = ::readdir(d));) {
             if (std::strncmp(e->d_name, "event", 5) != 0) continue;
             char path[128];
             std::snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
-            const int fd = ::open(path, O_RDONLY | O_NONBLOCK);
+            int fd = ::open(path, O_RDONLY | O_NONBLOCK);
             if (fd < 0) continue;
+            char name[256] = {0};
+            ::ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
+            // Skip synthetic devices (uinput clones, libvirtualhid, ...): the
+            // gate must read the user's *physical* mouse, or the button state is
+            // always released.
+            if (std::strstr(name, "uinput") || std::strstr(name, "virtual") ||
+                std::strstr(name, "Virtual") || std::strstr(name, "Keyboard") ||
+                std::strstr(name, "keyboard")) {
+                ::close(fd);
+                continue;
+            }
             unsigned long rel[8] = {0};
-            if (::ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel)), rel) < 0) {
+            unsigned long keys[12] = {0};
+            if (::ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel)), rel) < 0 ||
+                ::ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0) {
                 ::close(fd);
                 continue;
             }
-            const auto has = [&](int bit) {
-                return (rel[bit / (8 * sizeof(long))] >> (bit % (8 * sizeof(long)))) & 1UL;
+            const auto has = [](const unsigned long *bits, int bit) {
+                return (bits[bit / (8 * sizeof(long))] >> (bit % (8 * sizeof(long)))) & 1UL;
             };
-            if (!has(REL_X) || !has(REL_Y)) {  // not a mouse
+            if (!has(rel, REL_X) || !has(rel, REL_Y) || !has(keys, code)) {
                 ::close(fd);
                 continue;
             }
-            _fd = fd;
-            _path = path;
+            chosen = fd;
+            chosenPath = path;
+            chosenName = name;
             break;
         }
         ::closedir(d);
-        return _fd >= 0;
+        if (chosen < 0) return false;
+        _fd = chosen;
+        _path = chosenPath;
+        _name = chosenName;
+        return true;
     }
 
     void close() {
@@ -59,6 +79,7 @@ public:
     }
     bool ok() const { return _fd >= 0; }
     const char *path() const { return _path.c_str(); }
+    const char *name() const { return _name.c_str(); }
 
     bool down() const {
         if (_fd < 0) return false;
@@ -71,6 +92,7 @@ private:
     int _fd = -1;
     uint16_t _code = BTN_LEFT;
     std::string _path;
+    std::string _name;
 };
 
 }  // namespace hw2
