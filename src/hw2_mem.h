@@ -153,6 +153,27 @@ public:
     std::string nameOf(uintptr_t obj) const { return fname(u32(obj + kOffName)); }
     std::string className(uintptr_t obj) const { return nameOf(classOf(obj)); }
 
+    struct ObjectHead {
+        uintptr_t cls = 0;
+        uint32_t nameIdx = 0;
+        uintptr_t outer = 0;
+    };
+
+    // ClassPrivate + NamePrivate + OuterPrivate are contiguous (+0x10..+0x28),
+    // so one read gets all three instead of three separate reads.
+    bool objectHead(uintptr_t o, ObjectHead &h) const {
+        uint8_t buf[0x18];
+        if (!read(o + kOffClass, buf, sizeof(buf))) return false;
+        std::memcpy(&h.cls, buf, sizeof(uintptr_t));
+        std::memcpy(&h.nameIdx, buf + 8, sizeof(uint32_t));
+        std::memcpy(&h.outer, buf + 16, sizeof(uintptr_t));
+        return true;
+    }
+    std::string nameFromHead(const ObjectHead &h) const { return fname(h.nameIdx); }
+    std::string classNameFromHead(const ObjectHead &h) const {
+        return h.cls ? fname(u32(h.cls + kOffName)) : "";
+    }
+
     std::vector<std::string> classChain(uintptr_t obj, int depth = 16) const {
         std::vector<std::string> out;
         uintptr_t c = classOf(obj);
@@ -246,9 +267,19 @@ public:
         const int32_t num = i32(level + kOffActors + 8);
         const uintptr_t data = u64(level + kOffActors);
         if (!data || num <= 0 || num > 1000000) return;
+
+        // Bulk-read the whole pointer array in one go; fall back to per-element
+        // reads if it straddles an unmapped page.
+        std::vector<uintptr_t> arr(static_cast<size_t>(num));
+        const bool bulk = read(data, arr.data(), arr.size() * sizeof(uintptr_t));
+
         for (int32_t k = 0; k < num; ++k) {
-            const uintptr_t a = u64(data + static_cast<uintptr_t>(k) * 8);
-            if (!a || !isCharacterClass(classOf(a))) continue;
+            const uintptr_t a = bulk ? arr[static_cast<size_t>(k)]
+                                     : u64(data + static_cast<uintptr_t>(k) * 8);
+            if (!a) continue;
+            ObjectHead h;
+            if (!objectHead(a, h)) continue;
+            if (!isCharacterClass(h.cls)) continue;
             if (!u64(a + kOffRootComponent)) continue;   // not spawned yet
             actors.push_back(a);
         }
@@ -260,15 +291,22 @@ public:
     Player readPlayer(uintptr_t o) const {
         Player p;
         p.obj = o;
-        p.cls = className(o);
-        p.name = nameOf(o);
+        ObjectHead h;
+        if (objectHead(o, h)) {
+            p.cls = classNameFromHead(h);
+            p.name = nameFromHead(h);
+        }
         p.pos = translation(o);
         p.team = i32(o + kOffPawnTeam);
         const uintptr_t hc = u64(o + kOffHealthComp);
         if (hc) {
-            p.dead = u8(hc + kOffDead) != 0;
-            read(hc + kOffHealth, &p.hp, sizeof(double));
-            read(hc + kOffMaxHealth, &p.maxHp, sizeof(double));
+            // Health, MaxHealth and bDead are within one 0x40-byte window.
+            uint8_t hb[0x40];
+            if (read(hc + 0xC0, hb, sizeof(hb))) {
+                std::memcpy(&p.hp, hb + 0x08, sizeof(double));
+                std::memcpy(&p.maxHp, hb + 0x10, sizeof(double));
+                p.dead = hb[0x38] != 0;
+            }
         }
         return p;
     }
