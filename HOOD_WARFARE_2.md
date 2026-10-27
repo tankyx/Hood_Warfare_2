@@ -5,6 +5,10 @@ Binary: `HW2/Binaries/Win64/HW2-HoodWarfare2-Win64-Shipping.exe`.
 Engine: **Unreal Engine 5.8.3** (`++UE5+Release-5.8`).
 Platform: Linux, running under Proton/Wayland.
 
+> **Updated 2026-10-27:** a game patch moved the two reflection globals
+> (`FNamePool.Blocks[0]`, `GObjects`). Both RVAs below were re-derived live and
+> every field/struct offset was re-verified unchanged.
+
 Everything below is read-only, through `/proc/<pid>/mem`. No ptrace, no
 injection. Every address is `module_base + RVA` unless stated otherwise.
 
@@ -22,8 +26,8 @@ as runtime data: read it from `/proc/<pid>/maps`, never hardcode it. Verified by
 
 | symbol | value | how derived | status |
 |---|---|---|---|
-| `FNamePool.Blocks[0]` | `module_base + 0x0AEE54D0` | pointer to a block whose first entries are the built-in FNames; also the `GNAM_ES53_1` AOB target (`lea rcx,[FNamePool]`) | verified |
-| `GObjects` (`FUObjectArray`) | `module_base + 0x0AFB3500` | `GOBJ_ES53_1` AOB (`sub rsp,28; lea rcx,[GUObjectArray]; call FUObjectArray::FUObjectArray`), then live-scored over 96 candidates | verified |
+| `FNamePool.Blocks[0]` | `module_base + 0x0AFAB850` | pointer to a block whose first entries are the built-in FNames; also the `GNAM_ES53_1` AOB target (`lea rcx,[FNamePool]`) | verified |
+| `GObjects` (`FUObjectArray`) | `module_base + 0x0B079880` | `GOBJ_ES53_1` AOB (`sub rsp,28; lea rcx,[GUObjectArray]; call FUObjectArray::FUObjectArray`), then live-scored over 96 candidates | verified |
 
 ### FNamePool (GNames)
 
@@ -58,7 +62,7 @@ Read path: `chunk = *(Objects + (index >> 16) * 8)`;
 `UObject` fields used: `ClassPrivate` at `+0x10`, `NamePrivate` (FName
 comparison index) at `+0x18`, `OuterPrivate` at `+0x20`.
 
-Verified by `python3 hw2_mem.py --census`: **81,496 objects**, the first ones
+Verified by `python3 hw2_mem.py --census`: **121,815 objects**, the first ones
 being `Package /Script/CoreUObject`, `Class Object`, `Package /Script/Engine`,
 `Class Actor`.
 

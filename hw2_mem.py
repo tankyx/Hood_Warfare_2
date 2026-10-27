@@ -15,16 +15,16 @@ MODULE_NAME = "HW2-HoodWarfare2-Win64-Shipping.exe"
 # `(Len << 6) | flags` (bit0 = bIsWide) — NOT the classic `Len << 1` — and the
 # entry offset is `(index & 0xFFFF) * FNAME_STRIDE` (stride 2 on this build).
 # Verified live: 0x3/0xA/0x11 -> ByteProperty/IntProperty/BoolProperty.
-GNAMES_BLOCKS_RVA = 0x0AEE54D0
+GNAMES_BLOCKS_RVA = 0x0AFAB850
 FNAME_STRIDE = 2
 
 # FUObjectArray (`GObjects`) — located via the GOBJ_ES53_1 AOB signature
 # (`sub rsp,28; lea rcx,[GUObjectArray]; call FUObjectArray::FUObjectArray`).
 # UE 5.8 geometry: ObjObjects FIRST — {Objects +0x00, Num +0x08, Max +0x0C,
 # NumChunks +0x10, MaxChunks +0x14}; FUObjectItem stride 0x18 with the UObject*
-# at +0x08 (UE 5.7+ reordered item). Verified live: 81,496 objects, first ones
+# at +0x08 (UE 5.7+ reordered item). Verified live: 121,815 objects, first ones
 # Package /Script/CoreUObject, Class Object, Package /Script/Engine, Class Actor.
-GOBJECTS_RVA = 0x0AFB3500
+GOBJECTS_RVA = 0x0B079880
 ITEM_STRIDE = 0x18
 ITEM_OBJ_OFF = 0x08
 

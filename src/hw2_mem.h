@@ -4,8 +4,8 @@
 // Everything here was verified live against the shipping exe; the offsets and
 // their derivation are written up in HOOD_WARFARE_2.md. Summary:
 //
-//   GObjects          module_base + 0x0AFB3500 (GOBJ_ES53_1 AOB)
-//   FNamePool.Blocks  module_base + 0x0AEE54D0 (GNAM_ES53_1 AOB)
+//   GObjects          module_base + 0x0B079880 (GOBJ_ES53_1 AOB)
+//   FNamePool.Blocks  module_base + 0x0AFAB850 (GNAM_ES53_1 AOB)
 //   FUObjectArray     ObjObjects FIRST: Objects +0x00, NumElements +0x08
 //   FUObjectItem      0x18 bytes, UObject* at +0x08 (UE 5.7+ reordered item)
 //   FNameEntry        header = (Len << 6) | flags; offset = (idx & 0xFFFF) * 2
@@ -31,8 +31,8 @@ namespace hw2 {
 // ---------------------------------------------------------------- constants
 
 constexpr const char *kModule = "HW2-HoodWarfare2-Win64-Shipping.exe";
-constexpr uintptr_t kObjectsRva = 0x0AFB3500;   // FUObjectArray
-constexpr uintptr_t kNamesBlocksRva = 0x0AEE54D0; // FNamePool.Blocks[0]
+constexpr uintptr_t kObjectsRva = 0x0B079880;   // FUObjectArray
+constexpr uintptr_t kNamesBlocksRva = 0x0AFAB850; // FNamePool.Blocks[0]
 constexpr int kFNameStride = 2;
 constexpr uint32_t kObjectsCountOff = 0x08;
 constexpr uint32_t kItemStride = 0x18;
