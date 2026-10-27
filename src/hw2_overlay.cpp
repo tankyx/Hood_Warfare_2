@@ -37,6 +37,7 @@ struct Options {
     bool labels = true;
     bool aim = false;
     float aimFov = 6.0f;        // aim cone, degrees from crosshair
+    float triggerFov = 2.0f;    // triggerbot cone, degrees from crosshair
     float aimScale = 1.0f;
     float aimHeight = 0.40f;    // aim point as a fraction of body height above the capsule centre (0.5 = crown, 0.40 ~ neck)
     bool teams = false;         // false = FFA (everyone hostile); true = compare PawnTeam
@@ -102,6 +103,7 @@ int main(int argc, char **argv) {
         else if (a == "--max-dist" && i + 1 < argc) opt.maxDist = std::atof(argv[++i]);
         else if (a == "--height" && i + 1 < argc) opt.height = std::atof(argv[++i]);
         else if (a == "--aim-fov" && i + 1 < argc) opt.aimFov = std::atof(argv[++i]);
+        else if (a == "--trigger-fov" && i + 1 < argc) opt.triggerFov = std::atof(argv[++i]);
         else if (a == "--aim-height" && i + 1 < argc) opt.aimHeight = std::atof(argv[++i]);
         else if (a == "--teams") opt.teams = true;
         else if (a == "--no-fx") opt.fx = false;
@@ -109,7 +111,7 @@ int main(int argc, char **argv) {
         else if (a == "--hz" && i + 1 < argc) opt.hz = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
             std::printf("usage: %s [--dump] [--aim] [--no-labels] [--render WxH]"
-                        " [--max-dist U] [--aim-fov DEG] [--hz N]\n", argv[0]);
+                        " [--max-dist U] [--aim-fov DEG] [--trigger-fov DEG] [--hz N]\n", argv[0]);
             return 0;
         } else {
             std::fprintf(stderr, "unknown argument: %s\n", a.c_str());
@@ -153,6 +155,7 @@ int main(int argc, char **argv) {
     }
 
     hw2::ButtonGate lmb;
+    hw2::ButtonGate trigger;
     phm::PhysicalHidMouse mouse;
     if (opt.aim) {
         if (!mouse.open())
@@ -162,7 +165,11 @@ int main(int argc, char **argv) {
         if (!lmb.open(BTN_RIGHT))
             std::fprintf(stderr, "aim: no mouse for the RMB gate\n");
         else
-            std::fprintf(stderr, "aim gate: %s (%s) — aim engages on RMB\n", lmb.path(), lmb.name());
+            std::fprintf(stderr, "aim gate: %s (%s) — RMB = aim\n", lmb.path(), lmb.name());
+        if (!trigger.open(BTN_SIDE))
+            std::fprintf(stderr, "trigger: no mouse for the MOUSE4 gate\n");
+        else
+            std::fprintf(stderr, "trigger gate: %s (%s) — MOUSE4 = triggerbot\n", trigger.path(), trigger.name());
     }
 
     hw2::KeyGate killKey;
@@ -212,6 +219,7 @@ int main(int argc, char **argv) {
         labelNames.clear();
         float bestOx = 0, bestOy = 0, bestMag = 1e30f;
         double aimMaxPx = 0.0;
+        double triggerMaxPx = 0.0;
 
         if (cam.ok) {
             if (opt.aim) {
@@ -220,10 +228,10 @@ int main(int argc, char **argv) {
                 const double fovY = 2.0 * std::atan(std::tan(cam.fov * M_PI / 360.0) / aspect);
                 const double focal = (opt.renderH / 2.0) / std::tan(fovY / 2.0);
                 aimMaxPx = std::tan(opt.aimFov * M_PI / 360.0) * focal;
+                triggerMaxPx = std::tan(opt.triggerFov * M_PI / 360.0) * focal;
             }
             if (opt.aim && aimMaxPx > 0.0) {
-                // The aim cone, as a circle around the crosshair (radius = the
-                // pixel half-angle the target selection uses).
+                // Aim cone: hollow ring (thick, solid), no fill.
                 WaylandOverlay::Shape ring;
                 ring.kind = WaylandOverlay::Shape::Ellipse;
                 ring.x0 = opt.renderW / 2.0f;
@@ -231,13 +239,38 @@ int main(int argc, char **argv) {
                 ring.x1 = static_cast<float>(aimMaxPx);
                 ring.y1 = static_cast<float>(aimMaxPx);
                 ring.outline = true;
-                ring.thickness = 1.5f;
-                ring.color = 0x99FFEE00u;  // translucent yellow
+                ring.thickness = 1.0f;
+                ring.color = 0x80FFEE00u;  // half-transparent yellow
                 shapes.push_back(ring);
+            }
+            if (opt.aim && triggerMaxPx > 0.0) {
+                // Trigger cone (tighter): fire happens inside this ring.
+                WaylandOverlay::Shape tRing;
+                tRing.kind = WaylandOverlay::Shape::Ellipse;
+                tRing.x0 = opt.renderW / 2.0f;
+                tRing.y0 = opt.renderH / 2.0f;
+                tRing.x1 = static_cast<float>(triggerMaxPx);
+                tRing.y1 = static_cast<float>(triggerMaxPx);
+                tRing.outline = true;
+                tRing.thickness = 1.0f;
+                tRing.color = 0x80FF3030u;  // half-transparent red
+                shapes.push_back(tRing);
+            }
+            if (opt.aim) {
+                // Centre dot at the crosshair.
+                WaylandOverlay::Shape dot;
+                dot.kind = WaylandOverlay::Shape::Ellipse;
+                dot.x0 = opt.renderW / 2.0f;
+                dot.y0 = opt.renderH / 2.0f;
+                dot.x1 = 3.0f;
+                dot.y1 = 3.0f;
+                dot.color = 0xFFFFFFFFu;
+                shapes.push_back(dot);
             }
             for (const auto &p : players) {
                 if (p.local) continue;   // never ESP your own entity
                 if (p.dead) continue;    // don't box corpses
+                if (localTeam >= 0 && p.team == localTeam) continue;  // opponents only
                 const double d = dist(p.pos, cam.loc);
                 if (d > opt.maxDist) continue;
                 // The actor origin is the capsule centre (~hip), so the box spans
@@ -343,21 +376,26 @@ int main(int argc, char **argv) {
             overlay.setStats(0, fps);
         }
 
-        if (opt.aim && cam.ok && mouse.ok() && lmb.ok() && lmb.down() &&
-            bestMag < aimMaxPx && bestMag > 2.0f) {
-            const float gain = 0.15f * opt.aimScale;
-            const int dx = static_cast<int>(std::lround(bestOx * gain));
-            const int dy = static_cast<int>(std::lround(bestOy * gain));
-            // Re-send the physical button state: a HID report replaces the whole
-            // button byte, so dropping it would release a held right mouse (ADS).
-            if (dx || dy) mouse.move(dx, dy, lmb.mask());
+        if (opt.aim && cam.ok && mouse.ok()) {
+            // RMB = aim assist: pull the crosshair onto the best hostile in the cone.
+            const bool aiming = lmb.ok() && lmb.down() &&
+                                bestMag < aimMaxPx && bestMag > 2.0f;
+            const int dx = aiming ? static_cast<int>(std::lround(bestOx * 0.15f * opt.aimScale)) : 0;
+            const int dy = aiming ? static_cast<int>(std::lround(bestOy * 0.15f * opt.aimScale)) : 0;
+            // MOUSE4 = triggerbot: hold fire while a hostile is on the crosshair.
+            const bool firing = trigger.ok() && trigger.down() && bestMag < triggerMaxPx;
+            // A HID report replaces the whole button byte, so re-send the physical
+            // state (RMB for ADS, MOUSE4) plus a synthetic LMB when firing.
+            uint8_t buttons = lmb.mask();
+            if (firing) buttons |= phm::Left;
+            if (dx || dy || firing) mouse.move(dx, dy, buttons);
         }
         if (opt.aimDebug && (frames % 60) == 0) {
             std::fprintf(stderr,
-                         "aim: lmb_ok=%d lmb_down=%d rmb=%d mask=0x%02x mouse_ok=%d maxpx=%.0f best=%.0f dx=%.0f dy=%.0f target=%s scan=%.1fms\n",
-                         (int)lmb.ok(), (int)lmb.down(), (int)((lmb.mask() & phm::Right) != 0),
-                         (unsigned)lmb.mask(), (int)mouse.ok(), aimMaxPx, bestMag,
-                         bestOx, bestOy, bestMag < aimMaxPx ? "yes" : "no", lastScanMs);
+                         "aim: lmb_ok=%d lmb_down=%d trig=%d mask=0x%02x mouse_ok=%d maxpx=%.0f tmaxpx=%.0f best=%.0f target=%s scan=%.1fms\n",
+                         (int)lmb.ok(), (int)lmb.down(), (int)trigger.down(),
+                         (unsigned)lmb.mask(), (int)mouse.ok(), aimMaxPx, triggerMaxPx, bestMag,
+                         bestMag < aimMaxPx ? "yes" : "no", lastScanMs);
         }
 
         if (++fpsFrames >= 30) {
